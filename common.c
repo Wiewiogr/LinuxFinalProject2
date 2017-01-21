@@ -10,3 +10,10 @@ void registerHandler(int signalNumber, void(*handler)(int, siginfo_t*, void*))
         perror("sigaction");
     printf("zarejestrowalem sygnal\n");
 }
+
+extern char* createAbstractName(char name[])
+{
+    char* newName = (char*)malloc(50);
+    sprintf(newName,"\0%s",name);
+    return newName;
+}

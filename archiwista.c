@@ -11,9 +11,10 @@
 
 int createNewWorkerSocket(char name[], char position)
 {
+    char* newName = createAbstractName(name);
     int sockfd;
-    struct sockaddr_un workerAddr = {AF_UNIX, name};
-    strcpy(workerAddr.sun_path, name);
+    struct sockaddr_un workerAddr = {AF_UNIX, newName};
+    strcpy(workerAddr.sun_path, newName);
     if(position == 'l')
     {
         if((sockfd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0)) < 0)
@@ -26,6 +27,7 @@ int createNewWorkerSocket(char name[], char position)
     }
     if (bind(sockfd, (struct sockaddr *) &workerAddr, sizeof(workerAddr)) < 0)
         perror("bind");
+    free(newName);
     return sockfd;
 }
 
@@ -48,7 +50,7 @@ void updatePollfd(struct pollfd* pollFds, int index, int fd)
 struct Worker
 {
     char position;
-    char groupId;
+    char groupId[25];
     int socketFd;
     int originSocketFd;
 };
@@ -92,6 +94,7 @@ int main(int argc, char* argv[])
             printf("new Sock created : %d\n", newSock);
 
 
+            strcpy(workers[numberOfConnections-1].groupId,buffer);
             workers[numberOfConnections-1].socketFd = newSock;
             workers[numberOfConnections-1].originSocketFd = 0;
             workers[numberOfConnections-1].position = 'l';
@@ -119,9 +122,21 @@ int main(int argc, char* argv[])
                             workers[i-1].socketFd = newsockfd;
                             updatePollfd(pollFds,numberOfConnections-1, newsockfd);
                         }
-                        int number;
-                        read(workers[i-1].socketFd,&number,sizeof(number));
-                        printf("przeczytałem %d\n", number);
+                        char buffer[50];
+                        read(workers[i-1].socketFd,buffer,sizeof(buffer));
+                        char command[25];
+                        int number = strtol(buffer,&command,10);
+                        if(strcmp(command, "create"))
+                        {
+                            printf("craete command, with number %d\n",number);
+                            char workersSocketPath[35];
+                            sprintf(workersSocketPath,"%s%d",workers[i-1].groupId,number);
+                            write(workers[i-1].socketFd,workersSocketPath,sizeof(workersSocketPath));
+                        }
+                        else
+                        {
+                            printf("received : %s",buffer);
+                        }
                     }
                 }
             }
