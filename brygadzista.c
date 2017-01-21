@@ -4,6 +4,9 @@
 #include <errno.h>
 #include <signal.h>
 #include "common.h"
+#include <signal.h>
+#include <time.h>
+#include <fcntl.h>
 
 #include <string.h>
 #include <sys/types.h>
@@ -11,7 +14,6 @@
 #include <sys/un.h>
 #include <netinet/in.h>
 #include <netdb.h> 
-
 
 struct Worker
 {
@@ -24,9 +26,16 @@ int workerGroupPid;
 char brigadeId[] = "aa\0";
 int numberOfWorkers;
 
+void timerHandler(int sig, siginfo_t *si, void *uc)
+{
+    printf("handler!!1\n");
+    killpg(workerGroupPid, SIGALRM);
+}
+
 void onExit()
 {
     killpg(workerGroupPid, SIGKILL);
+    printf("on exit!!!\n");
 }
 
 void createWorker(char* socketName, int pipeFd[2])
@@ -50,12 +59,27 @@ void createWorker(char* socketName, int pipeFd[2])
     }
 }
 
+int connectToSocket(char name[])
+{
+    int sockfd;
+    struct sockaddr_un serv_addr = {AF_UNIX, ""};
+    strcpy(serv_addr.sun_path,name);
+    if(sockfd = socket(AF_UNIX, SOCK_STREAM, 0))
+        perror("socket");
+    if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0)
+        perror("connect");
+    return sockfd;
+}
+
+
 
 int main(int argc, char* argv[])
 {
+    struct itimerspec timeStamp;
+    timer_t timerId;
     int opt;
 
-    while ((opt = getopt(argc, argv, "i:n:")) != -1)
+    while ((opt = getopt(argc, argv, "i:n:t:")) != -1)
     {
         switch (opt)
         {
@@ -65,9 +89,13 @@ int main(int argc, char* argv[])
         case 'n':
             numberOfWorkers = atoi(optarg);
             break;
+        case 't':
+            convertFloatToTimeSpec(strtof(optarg,NULL),&timeStamp.it_value);
+            timeStamp.it_interval = timeStamp.it_value;
+            break;
         }
     }
-    printf("brygadzista gid : %d\n", getpgrp());
+
     if((workerGroupPid = fork()) == 0)
     {
         setpgid(0,0);
@@ -77,52 +105,66 @@ int main(int argc, char* argv[])
     sleep(1);
 
     atexit(onExit);
-    killpg(workerGroupPid, SIGALRM); ///
-
-    int sockfd, portno, n;
-    struct sockaddr_un serv_addr = {AF_UNIX, "registrationChannel\0"};
 
     char buffer[256] = {0};
-    if(sockfd = socket(AF_UNIX, SOCK_STREAM, 0))
+    {
+        int sockfd = connectToSocket("registrationChannel\0");
+
+        write(sockfd,brigadeId,strlen(brigadeId));
+        read(sockfd,buffer,255);
+            perror("read");
+        close(sockfd);
+        printf("read : %s\n", buffer);
+    }
+
+    struct sockaddr_un privateAddr = createAbstractSockaddr(buffer);
+    int newSock;
+    if((newSock = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
         perror("socket");
-    if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0)
-        perror("connect");
-    write(sockfd,brigadeId,strlen(brigadeId));
-    read(sockfd,buffer,255);
-        perror("read");
-    close(sockfd);
-    printf("read : %s\n", buffer);
 
-    struct sockaddr_un privateAddr = {AF_UNIX, buffer};
-    char* socketName = createAbstractName(buffer);
-    strcpy(privateAddr.sun_path,socketName);
-    free(socketName);
-
-    int newSock = socket(AF_UNIX, SOCK_STREAM, 0);
-
-    if (newSock < 0)
-        perror("ERROR opening socket");
     if (connect(newSock,(struct sockaddr *) &privateAddr,sizeof(privateAddr)) < 0)
-        perror("ERROR connecting");
+        perror("connect");
+
     int pipeFd[2];
-    pipe(pipeFd);
+    pipe2(pipeFd,O_NONBLOCK);
+
     for(int i = 0 ; i < numberOfWorkers; i++)
     {
-        char request[25];
+        char request[35];
         sprintf(request,"%dcreate",i);
         write(newSock,request, sizeof(request));
         char response[35];
         read(newSock,response, sizeof(response));
-        createWorker(response,pipeFd);
-        write(pipeFd[1],"dupa\0",5);
         sleep(1);
+        createWorker(response,pipeFd);
     }
 
-    for(int i = 0 ; i < 100;i++)
+    char writtenText[] = "dupa Dupa DUpa DUPa DUPA";
+    write(pipeFd[1],&writtenText,sizeof(writtenText));
+
+    createTimerAndRegisterHandler(&timerId,timerHandler);
+    setTimer(timerId,&timeStamp);
+
+    int status;
+    while(1)
     {
-        write(pipeFd[1],&i,sizeof(i));
-        sleep(1);
+        int res = waitpid(-workerGroupPid,&status,0);
+        if(res == -1)
+            printf("zjeblo sie\n");
+        if (WIFEXITED(status))
+        {
+            if(WEXITSTATUS(status) == 0)
+            {
+                if(--numberOfWorkers == 0)
+                {
+                    write(newSock,"1done", 5);
+                    break;
+                }
+            }
+        }
+
     }
+
     while(1)
         pause();
     close(newSock);
