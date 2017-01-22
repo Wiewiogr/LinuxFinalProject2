@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -6,7 +7,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <netinet/in.h>
+#include <poll.h>
 #include <netdb.h>
 #include <time.h>
 #include <math.h>
@@ -17,7 +18,6 @@ struct Message
     long int sec;
     long int nsec;
     char value;
-    //struct timespec time;
 };
 
 struct Messages
@@ -40,3 +40,17 @@ extern void setTimer(timer_t timerId,struct itimerspec *timeSpec);
 extern int messageComp(const void* first, const void* second);
 
 extern char* getMD5sum(char * string);
+
+extern int createNewWorkerSocket(char name[], char position);
+
+extern int acceptConnection(int fd);
+
+extern void updatePollfd(struct pollfd* pollFds, int index, int fd);
+
+extern struct Message* createMessageFromString(char* buffer);
+
+extern int getGroupIndex(char* groupId, struct Messages*  msgs, int numberOfGroups );
+
+extern void removeFromPollFd(struct pollfd * pollfds, int fd, int size);
+
+extern void removeFromMessages(struct Messages * msgs, int index, int size);

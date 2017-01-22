@@ -12,7 +12,7 @@ archiwista.out: archiwista.c libCommon.so
 	gcc -o archiwista.out archiwista.c $(COMMON_FLAGS)
 
 libCommon.so : common.c common.h
-		gcc -fPIC -shared -o libCommon.so common.c -lm -lrt -lcrypto -lssl
+		gcc -fPIC -shared -o libCommon.so common.c -lm -lrt -lcrypto
 
 clean:
 	rm *.out *.so

@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,20 +8,16 @@
 #include <signal.h>
 #include <time.h>
 #include <fcntl.h>
-
+#include <sys/wait.h>
 #include <string.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <netinet/in.h>
-#include <netdb.h> 
 
 struct Worker
 {
     int pid;
     char socketName[25];
 };
-
 
 int workerGroupPid;
 char brigadeId[10] = "aa";
@@ -29,7 +26,6 @@ int newSock;
 
 void timerHandler(int sig, siginfo_t *si, void *uc)
 {
-    printf("handler!!1\n");
     killpg(workerGroupPid, SIGALRM);
 }
 
@@ -43,11 +39,11 @@ void interruptHandler(int sig, siginfo_t *si, void *uc)
 void onExit()
 {
     killpg(workerGroupPid, SIGKILL);
-    printf("on exit!!!\n");
 }
 
 void createWorker(struct Worker* workers, int index, char* socketName, int pipeFd[2])
 {
+    printf("Creating worker...\n");
     char socketArg[25];
     sprintf(socketArg,"-s%s", socketName);
     char * newArgs[] =
@@ -81,14 +77,12 @@ int connectToSocket(char name[])
     return sockfd;
 }
 
-
-
 int main(int argc, char* argv[])
 {
     struct itimerspec timeStamp;
     timer_t timerId;
     int opt;
-    char message[256] = "dupa Dupa DUpa DUPa DUPA";
+    char message[256] = "message";
     char publicChannel[50] = "registrationChannel";
 
     while ((opt = getopt(argc, argv, "i:n:t:m:c:")) != -1)
@@ -123,7 +117,6 @@ int main(int argc, char* argv[])
     }
 
     sleep(1);
-
     atexit(onExit);
 
     char buffer[50] = {0};
@@ -131,20 +124,21 @@ int main(int argc, char* argv[])
     {
         int sockfd = connectToSocket(publicChannel);
         write(sockfd,brigadeId,strlen(brigadeId));
-        read(sockfd,buffer,255);
+        if(read(sockfd,buffer,255) == -1)
             perror("read");
         close(sockfd);
-        printf("read : %s\n", buffer);
         if(strcmp(buffer,"again")!=0)
             break;
         else
+        {
+            printf("Trying again.\n");
             memset(buffer,0, 50 *sizeof(char));
+        }
     }
 
     struct sockaddr_un privateAddr = createAbstractSockaddr(buffer);
     if((newSock = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
         perror("socket");
-
     if (connect(newSock,(struct sockaddr *) &privateAddr,sizeof(privateAddr)) < 0)
         perror("connect");
 
@@ -173,22 +167,18 @@ int main(int argc, char* argv[])
     while(1)
     {
         int res = waitpid(-workerGroupPid,&status,0);
-        if(res == -1)
-            printf("zjeblo sie\n");
-        else
-            printf("pid %d\n", res);
+
         if (WIFEXITED(status))
         {
-            printf("EXITEDD!!!!!!!!\n");
             if(WEXITSTATUS(status) == 0)
             {
+                printf("Worker finished his job.\n");
                 if(--numberOfWorkers == 0)
                 {
                     char res[90] = {0};
                     strcpy(res,getMD5sum(message));
                     char finalMessage[110] = {0};
                     sprintf(finalMessage, "1done%s", res);
-                    printf("final message : %s\n", finalMessage);
                     write(newSock,finalMessage,strlen(finalMessage));
                     break;
                 }
@@ -196,20 +186,19 @@ int main(int argc, char* argv[])
         }
         else if(WIFSIGNALED(status))
         {
-            printf("SIGNALED!!!!!!!!\n");
+            printf("Worker killed...\n");
             for(int i = 0; i < numberOfWorkers; i++)
             {
                 if(workers[i].pid == res)
                 {
-                    createWorker(workers, i,workers[i].socketName,pipeFd);
+                    createWorker(workers, i, workers[i].socketName, pipeFd);
                     break;
                 }
             }
-
         }
-
     }
 
+    free(workers);
     close(newSock);
     return 0;
 }

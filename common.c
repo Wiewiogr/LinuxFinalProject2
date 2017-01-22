@@ -8,7 +8,6 @@ void registerHandler(int signalNumber, void(*handler)(int, siginfo_t*, void*))
     sigemptyset(&sa.sa_mask);
     if (sigaction(signalNumber, &sa, NULL) == -1)
         perror("sigaction");
-    printf("zarejestrowalem sygnal\n");
 }
 
 
@@ -67,14 +66,96 @@ extern int messageComp(const void* first, const void* second)
 extern char* getMD5sum(char * string)
 {
     char result[MD5_DIGEST_LENGTH];
-
     char *res = MD5(string, strlen(string), result);
-
     char *readableSum = malloc(70);
     memset(readableSum,0,70);
     for(int n=0; n<MD5_DIGEST_LENGTH; n++)
         sprintf(readableSum,"%s%02x",readableSum,  result[n]);
-    sprintf(readableSum,"%s\0",readableSum);
     return readableSum;
+}
+
+int createNewWorkerSocket(char name[], char position)
+{
+    struct sockaddr_un workerAddr = createAbstractSockaddr(name);
+    int sockfd;
+    if(position == 'l')
+    {
+        if((sockfd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0)) < 0)
+            perror("socket");
+    }
+    else if(position == 'w')
+    {
+        if((sockfd = socket(AF_UNIX, SOCK_DGRAM , 0)) < 0)
+            perror("socket");
+    }
+    if (bind(sockfd, (struct sockaddr *) &workerAddr, sizeof(struct sockaddr_un)) < 0)
+        perror("bind");
+    return sockfd;
+}
+
+int acceptConnection(int fd)
+{
+    struct sockaddr_un cli_addr;
+    socklen_t clilen = sizeof(cli_addr);
+    return accept(fd, (struct sockaddr *) &cli_addr, &clilen);
+}
+
+
+void updatePollfd(struct pollfd* pollFds, int index, int fd)
+{
+    pollFds[index].fd = fd;
+    pollFds[index].events = POLLIN | POLLRDHUP;
+    pollFds[index].revents = 0;
+}
+
+struct Message* createMessageFromString(char* buffer)
+{
+    struct Message* msg = malloc(sizeof(struct Message));
+    msg->value = buffer[0];
+    char *sec;
+    msg->sec = strtoll(buffer+1,&sec,10);
+    msg->nsec = strtoll(sec+1,NULL,10);
+    return msg;
+}
+
+int getGroupIndex(char* groupId, struct Messages*  msgs, int numberOfGroups )
+{
+    for(int i = 0 ; i < numberOfGroups ; i++)
+    {
+        if(strncmp(msgs[i].group,groupId, strlen(msgs[i].group)-1) == 0)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void removeFromPollFd(struct pollfd * pollfds, int fd, int size)
+{
+    int target = 0;
+    for(int i = 1; i < size; i++)
+    {
+        if(pollfds[i].fd == fd)
+        {
+            target = i;
+            break;
+        }
+    }
+    if(target != 0)
+    {
+        for(int i = target; i < size-1; i++)
+        {
+            pollfds[i] = pollfds[i+1];
+        }
+    }
+}
+
+void removeFromMessages(struct Messages * msgs, int index, int size)
+{
+    msgs[index].numberOfMessages = 0;
+    for(int i = index; i < size-1; i++)
+    {
+        msgs[i] = msgs[i+1];
+    }
 }
 

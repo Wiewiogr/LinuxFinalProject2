@@ -3,13 +3,9 @@
 #include <stdio.h>
 #include <errno.h>
 #include "common.h"
-
 #include <string.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <netinet/in.h>
-#include <netdb.h>
 
 int sockfd;
 
@@ -22,20 +18,19 @@ void timerHandler(int sig, siginfo_t *si, void *uc)
             close(sockfd);
             exit(0);
         }
+
     struct timespec currentTime;
     clock_gettime(CLOCK_REALTIME,&currentTime);
     char message[50];
     sprintf(message,"%c%ld.%ld",byte, currentTime.tv_sec,currentTime.tv_nsec);
-    printf("dostalem sygnal!!!\n");
-    write(sockfd,&message,sizeof(message));
-    perror("write");
+    if(write(sockfd,&message,sizeof(message))==-1)
+        perror("write");
 }
 
 int main(int argc, char* argv[])
 {
     int opt;
     char socketName[25];
-
     while ((opt = getopt(argc, argv, "s:")) != -1)
     {
         switch (opt)
@@ -45,12 +40,12 @@ int main(int argc, char* argv[])
             break;
         }
     }
+
     registerHandler(SIGALRM,timerHandler);
-    printf("my pid : %d, my group : %d my socket : %s\n",getpid(),  getpgrp(), socketName);
+    printf("Created worker with pid : %d, pgid : %d socket : %s\n",getpid(),  getpgrp(), socketName);
 
     struct sockaddr_un serv_addr = createAbstractSockaddr(socketName);
-
-    if(sockfd = socket(AF_UNIX, SOCK_DGRAM, 0))
+    if((sockfd = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0)
         perror("socket");
     if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(struct sockaddr_un)) < 0)
         perror("connect");
