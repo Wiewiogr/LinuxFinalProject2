@@ -78,8 +78,9 @@ int main(int argc, char* argv[])
     struct itimerspec timeStamp;
     timer_t timerId;
     int opt;
+    char message[256] = "dupa Dupa DUpa DUPa DUPA";
 
-    while ((opt = getopt(argc, argv, "i:n:t:")) != -1)
+    while ((opt = getopt(argc, argv, "i:n:t:m:")) != -1)
     {
         switch (opt)
         {
@@ -92,6 +93,9 @@ int main(int argc, char* argv[])
         case 't':
             convertFloatToTimeSpec(strtof(optarg,NULL),&timeStamp.it_value);
             timeStamp.it_interval = timeStamp.it_value;
+            break;
+        case 'm':
+            strcpy(message,optarg);
             break;
         }
     }
@@ -139,13 +143,13 @@ int main(int argc, char* argv[])
         createWorker(response,pipeFd);
     }
 
-    char writtenText[] = "dupa Dupa DUpa DUPa DUPA";
-    write(pipeFd[1],&writtenText,sizeof(writtenText));
+    write(pipeFd[1],&message,strlen(message));
 
     createTimerAndRegisterHandler(&timerId,timerHandler);
     setTimer(timerId,&timeStamp);
 
     int status;
+
     while(1)
     {
         int res = waitpid(-workerGroupPid,&status,0);

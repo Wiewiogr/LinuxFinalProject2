@@ -18,7 +18,10 @@ void timerHandler(int sig, siginfo_t *si, void *uc)
     char byte;
     if(read(0,&byte,1) == -1)
         if(errno == EAGAIN)
+        {
+            close(sockfd);
             exit(0);
+        }
     struct timespec currentTime;
     clock_gettime(CLOCK_REALTIME,&currentTime);
     char message[50];

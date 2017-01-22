@@ -22,7 +22,7 @@ struct Message
 struct Messages
 {
     char group[25];
-    struct Message messsages[100];
+    struct Message messsages[150];
     int numberOfMessages;
 };
 
