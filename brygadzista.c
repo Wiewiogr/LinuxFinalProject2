@@ -23,13 +23,21 @@ struct Worker
 
 
 int workerGroupPid;
-char brigadeId[] = "aa\0";
+char brigadeId[10] = "aa";
 int numberOfWorkers;
+int newSock;
 
 void timerHandler(int sig, siginfo_t *si, void *uc)
 {
     printf("handler!!1\n");
     killpg(workerGroupPid, SIGALRM);
+}
+
+void interruptHandler(int sig, siginfo_t *si, void *uc)
+{
+    killpg(workerGroupPid, SIGKILL);
+    write(newSock,"1doneINT",8);
+    exit(1);
 }
 
 void onExit()
@@ -38,7 +46,7 @@ void onExit()
     printf("on exit!!!\n");
 }
 
-void createWorker(char* socketName, int pipeFd[2])
+void createWorker(struct Worker* workers, int index, char* socketName, int pipeFd[2])
 {
     char socketArg[25];
     sprintf(socketArg,"-s%s", socketName);
@@ -48,8 +56,8 @@ void createWorker(char* socketName, int pipeFd[2])
         socketArg,
         (char *) 0
     };
-
-    if(fork() == 0)
+    int pid;
+    if((pid = fork()) == 0)
     {
         dup2(pipeFd[0],0);
         close(pipeFd[1]);
@@ -57,6 +65,8 @@ void createWorker(char* socketName, int pipeFd[2])
         execvp("./robotnik.out",newArgs);
         exit(1);
     }
+    workers[index].pid = pid;
+    strcpy(workers[index].socketName, socketName);
 }
 
 int connectToSocket(char name[])
@@ -79,8 +89,9 @@ int main(int argc, char* argv[])
     timer_t timerId;
     int opt;
     char message[256] = "dupa Dupa DUpa DUPa DUPA";
+    char publicChannel[50] = "registrationChannel";
 
-    while ((opt = getopt(argc, argv, "i:n:t:m:")) != -1)
+    while ((opt = getopt(argc, argv, "i:n:t:m:c:")) != -1)
     {
         switch (opt)
         {
@@ -97,8 +108,13 @@ int main(int argc, char* argv[])
         case 'm':
             strcpy(message,optarg);
             break;
+        case 'c':
+            strcpy(publicChannel,optarg);
+            break;
         }
     }
+
+    struct Worker * workers = malloc(numberOfWorkers*sizeof(struct Worker));
 
     if((workerGroupPid = fork()) == 0)
     {
@@ -110,19 +126,22 @@ int main(int argc, char* argv[])
 
     atexit(onExit);
 
-    char buffer[256] = {0};
+    char buffer[50] = {0};
+    while(1)
     {
-        int sockfd = connectToSocket("registrationChannel\0");
-
+        int sockfd = connectToSocket(publicChannel);
         write(sockfd,brigadeId,strlen(brigadeId));
         read(sockfd,buffer,255);
             perror("read");
         close(sockfd);
         printf("read : %s\n", buffer);
+        if(strcmp(buffer,"again")!=0)
+            break;
+        else
+            memset(buffer,0, 50 *sizeof(char));
     }
 
     struct sockaddr_un privateAddr = createAbstractSockaddr(buffer);
-    int newSock;
     if((newSock = socket(AF_UNIX, SOCK_STREAM, 0)) < 0)
         perror("socket");
 
@@ -140,11 +159,12 @@ int main(int argc, char* argv[])
         char response[35];
         read(newSock,response, sizeof(response));
         sleep(1);
-        createWorker(response,pipeFd);
+        createWorker(workers,i,response,pipeFd);
     }
 
     write(pipeFd[1],&message,strlen(message));
 
+    registerHandler(SIGINT,interruptHandler);
     createTimerAndRegisterHandler(&timerId,timerHandler);
     setTimer(timerId,&timeStamp);
 
@@ -155,22 +175,41 @@ int main(int argc, char* argv[])
         int res = waitpid(-workerGroupPid,&status,0);
         if(res == -1)
             printf("zjeblo sie\n");
+        else
+            printf("pid %d\n", res);
         if (WIFEXITED(status))
         {
+            printf("EXITEDD!!!!!!!!\n");
             if(WEXITSTATUS(status) == 0)
             {
                 if(--numberOfWorkers == 0)
                 {
-                    write(newSock,"1done", 5);
+                    char res[90] = {0};
+                    strcpy(res,getMD5sum(message));
+                    char finalMessage[110] = {0};
+                    sprintf(finalMessage, "1done%s", res);
+                    printf("final message : %s\n", finalMessage);
+                    write(newSock,finalMessage,strlen(finalMessage));
                     break;
                 }
             }
         }
+        else if(WIFSIGNALED(status))
+        {
+            printf("SIGNALED!!!!!!!!\n");
+            for(int i = 0; i < numberOfWorkers; i++)
+            {
+                if(workers[i].pid == res)
+                {
+                    createWorker(workers, i,workers[i].socketName,pipeFd);
+                    break;
+                }
+            }
+
+        }
 
     }
 
-    while(1)
-        pause();
     close(newSock);
     return 0;
 }

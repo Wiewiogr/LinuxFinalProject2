@@ -11,8 +11,8 @@ robotnik.out: robotnik.c libCommon.so
 archiwista.out: archiwista.c libCommon.so
 	gcc -o archiwista.out archiwista.c $(COMMON_FLAGS)
 
-libCommon.so : common.c
-		gcc -fPIC -shared -o libCommon.so common.c -lm -lrt
+libCommon.so : common.c common.h
+		gcc -fPIC -shared -o libCommon.so common.c -lm -lrt -lcrypto -lssl
 
 clean:
 	rm *.out *.so

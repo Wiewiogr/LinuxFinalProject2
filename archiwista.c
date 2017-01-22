@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <time.h>
 #include <poll.h>
@@ -21,7 +22,6 @@ int createNewWorkerSocket(char name[], char position)
     }
     else if(position == 'w')
     {
-        printf("creating worker socket %s\n",name);
         if((sockfd = socket(AF_UNIX, SOCK_DGRAM , 0)) < 0)
             perror("socket");
     }
@@ -41,7 +41,7 @@ int acceptConnection(int fd)
 void updatePollfd(struct pollfd* pollFds, int index, int fd)
 {
     pollFds[index].fd = fd;
-    pollFds[index].events = POLLIN;
+    pollFds[index].events = POLLIN | POLLRDHUP;
     pollFds[index].revents = 0;
 }
 
@@ -66,6 +66,7 @@ int getGroupIndex(char* groupId, struct Messages*  msgs, int numberOfGroups )
             return i;
         }
     }
+    return -1;
     printf("jebac grupy\n");
 }
 
@@ -90,9 +91,6 @@ void removeFromPollFd(struct pollfd * pollfds, int fd, int size)
             pollfds[i] = pollfds[i+1];
         }
     }
-//    printf("after\n");
-//    for(int i = 0; i < size; i++)
-//        printf("pollfd[%d] = %d\n",i,pollfds[i].fd);
     if(target == 0)
         printf("nie znalazlo takiego fd!!!\n");
 
@@ -144,7 +142,23 @@ int main(int argc, char* argv[])
 {
     struct Messages messages[5];
     int sockfd, newsockfd;
-    struct sockaddr_un serv_addr = {AF_UNIX, "registrationChannel"};
+    char publicChannel[50] = "registrationChannel";
+
+    int opt;
+    while ((opt = getopt(argc, argv, "c:")) != -1)
+    {
+        switch (opt)
+        {
+        case 'c':
+            strcpy(publicChannel,optarg);
+            break;
+        }
+    }
+
+    struct sockaddr_un serv_addr;
+    serv_addr.sun_family = AF_UNIX;
+    strcpy(serv_addr.sun_path, publicChannel);
+    unlink(publicChannel);
 
     if((sockfd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0)) < 0)
         perror("ERROR opening socket");
@@ -170,22 +184,61 @@ int main(int argc, char* argv[])
 
             printf("przeczytałem %s\n", buffer);
 
-            if (write(newsockfd,buffer,strlen(buffer)) < 0)
-                perror("write");
-            close(newsockfd);
+            if(getGroupIndex(buffer,messages, numberOfGroups) != -1)
+            {
+                if (write(newsockfd,"again\0",6) < 0)
+                    perror("write");
+                printf("There is group with that id!!!\n");
+                close(newsockfd);
+                //removing from group
+                            int index = getGroupIndex(buffer, messages, numberOfGroups);
 
-            int newSock = createNewWorkerSocket(buffer,'l');
-            printf("new Sock created : %d\n", newSock);
+                            removeFromMessages(messages, index, numberOfGroups--);
+                            int numberOfWorkers = numberOfConnections;
+                            char groupName[25];
+                            strcpy(groupName, buffer);
+                            for(int j = 0 ; j < numberOfWorkers; j++)
+                            {
+                                printf("%s ? %s\n",workers[j].groupId,groupName);
+                                if(strncmp(workers[j].groupId,groupName,strlen(groupName)-1)==0)
+                                {
+                                    printf("zamykam socket\n");
+                                    close(workers[j].socketFd);
+                                    if(workers[j].position == 'l')
+                                    {
+                                        close(workers[j].originSocketFd);
+                                    }
+    printf("before\n");
+    for(int i = 0; i < numberOfConnections; i++)
+        printf("pollfd[%d] = %d\n",i,pollFds[i].fd);
+                                    removeFromPollFd(pollFds, workers[j].socketFd,numberOfConnections--);
+    printf("after\n");
+    for(int i = 0; i < numberOfConnections+1; i++)
+        printf("pollfd[%d] = %d\n",i,pollFds[i].fd);
+                                    removeFromWorkers(workers,j,numberOfConnections);
 
-            strcpy(messages[numberOfGroups++].group, buffer);
-            strcpy(workers[numberOfConnections-1].groupId,buffer);
-            workers[numberOfConnections-1].socketFd = newSock;
-            workers[numberOfConnections-1].originSocketFd = 0;
-            workers[numberOfConnections-1].position = 'l';
-            updatePollfd(pollFds,numberOfConnections++, newSock);
+                                }
 
-            listen(newSock, 2);
+                            }
+            }
+            else
+            {
+                if (write(newsockfd,buffer,strlen(buffer)) < 0)
+                    perror("write");
+                close(newsockfd);
 
+                int newSock = createNewWorkerSocket(buffer,'l');
+                printf("new Sock created : %d\n", newSock);
+
+                strcpy(messages[numberOfGroups++].group, buffer);
+                strcpy(workers[numberOfConnections-1].groupId,buffer);
+                workers[numberOfConnections-1].socketFd = newSock;
+                workers[numberOfConnections-1].originSocketFd = 0;
+                workers[numberOfConnections-1].position = 'l';
+                updatePollfd(pollFds,numberOfConnections++, newSock);
+
+                listen(newSock, 2);
+            }
 //            if(messages == NULL)
 //            {
 //                messages = (struct Messages*)malloc(sizeof(struct Messages));
@@ -195,6 +248,7 @@ int main(int argc, char* argv[])
 //            {
 //                messages = realloc(messages,numberOfGroups * sizeof(struct Messages));
 //            }
+
         }
         else
         {
@@ -217,13 +271,13 @@ int main(int argc, char* argv[])
                             workers[i-1].socketFd = newsockfd;
                             updatePollfd(pollFds,numberOfConnections-1, newsockfd);
                         }
-                        char buffer[50] = {0};
+                        char buffer[100] = {0};
                         read(workers[i-1].socketFd,buffer,sizeof(buffer));
                         printf("received : %s\n",buffer);
                         char* command;
                         int number = strtol(buffer,&command,10);
                         printf("command : %s\n", command);
-                        if(strcmp(command, "create") == 0)
+                        if(strncmp(command, "create", 6) == 0)
                         {
                             printf("create command, with number %d\n",number);
                             char workersSocketPath[35];
@@ -231,7 +285,7 @@ int main(int argc, char* argv[])
                             write(workers[i-1].socketFd,workersSocketPath,sizeof(workersSocketPath));
                             int newSock = createNewWorkerSocket(workersSocketPath,'w');
 
-                            strcpy(workers[numberOfConnections-1].groupId,workersSocketPath);
+                            strcpy(workers[numberOfConnections-1].groupId,workers[i-1].groupId);
                             workers[numberOfConnections-1].socketFd = newSock;
                             workers[numberOfConnections-1].originSocketFd = 0;
                             workers[numberOfConnections-1].position = 'w';
@@ -239,22 +293,44 @@ int main(int argc, char* argv[])
                             updatePollfd(pollFds,numberOfConnections++, newSock);
 
                         }
-                        else if(strcmp(command, "done") == 0)
+                        else if(strncmp(command, "done",4 ) == 0)
                         {
                             int index = getGroupIndex(workers[i-1].groupId, messages, numberOfGroups);
                             qsort(messages[index].messsages,
                                     messages[index].numberOfMessages,
                                     sizeof(struct Message),messageComp);
 
+                            char * completeMessage = malloc((messages[index].numberOfMessages+1)*sizeof(char));
+                            memset(completeMessage,0,(messages[index].numberOfMessages+1)*sizeof(char));
                             for(int i = index ; i < messages[index].numberOfMessages; i++)
                             {
-                                printf("%c",messages[index].messsages[i].value);
-                                printf(" %ld.",messages[index].messsages[i].sec);
-                                printf("%ld\n",messages[index].messsages[i].nsec);
+                                completeMessage[i] = messages[index].messsages[i].value;
                             }
-                            removeFromMessages(messages, index, numberOfGroups--);
-                            printf("\n");
 
+                            if(strcmp(command+4, "INT")!=0)
+                            {
+                                printf("complete message : %s\n", completeMessage);
+                                printf("received md5sum : %s\n",command+4 );
+                                char md5sum[90] = {0};
+                                strcpy(md5sum,getMD5sum(completeMessage));
+                                printf("calculated md5sum : %s\n",md5sum);
+
+                                if(strcmp(command+4, md5sum) == 0)
+                                {
+                                    printf("Message is complete and correct, checsums match\n");
+                                }
+                                else
+                                {
+                                    printf("Message is corrupted, checksums doesn not match\n");
+                                }
+                            }
+                            else
+                            {
+                                printf("Message transmission was interrupted\n");
+                                printf("Incomplete message : %s\n", completeMessage);
+                            }
+
+                            removeFromMessages(messages, index, numberOfGroups--);
                             int numberOfWorkers = numberOfConnections;
                             char groupName[25];
                             strcpy(groupName, workers[i-1].groupId);
@@ -306,7 +382,39 @@ int main(int argc, char* argv[])
                 }
                 else if(pollFds[i].revents & POLLHUP)
                 {
+                    printf("fd : %d ", pollFds[i].fd);
                     printf("POOLLHUP\n");
+
+                            int index = getGroupIndex(workers[i-1].groupId, messages, numberOfGroups);
+
+                            removeFromMessages(messages, index, numberOfGroups--);
+                            int numberOfWorkers = numberOfConnections;
+                            char groupName[25];
+                            strcpy(groupName, workers[i-1].groupId);
+                            for(int j = 0 ; j < numberOfWorkers; j++)
+                            {
+                                printf("%s ? %s\n",workers[j].groupId,groupName);
+                                if(strncmp(workers[j].groupId,groupName,strlen(groupName)-1)==0)
+                                {
+                                    printf("zamykam socket\n");
+                                    close(workers[j].socketFd);
+                                    if(workers[j].position == 'l')
+                                    {
+                                        close(workers[j].originSocketFd);
+                                    }
+    printf("before\n");
+    for(int i = 0; i < numberOfConnections; i++)
+        printf("pollfd[%d] = %d\n",i,pollFds[i].fd);
+                                    removeFromPollFd(pollFds, workers[j].socketFd,numberOfConnections--);
+    printf("after\n");
+    for(int i = 0; i < numberOfConnections+1; i++)
+        printf("pollfd[%d] = %d\n",i,pollFds[i].fd);
+                                    removeFromWorkers(workers,j,numberOfConnections);
+
+                                }
+
+                            }
+
                 }
             }
         }

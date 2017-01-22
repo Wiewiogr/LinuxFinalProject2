@@ -64,3 +64,17 @@ extern int messageComp(const void* first, const void* second)
     return 0;
 }
 
+extern char* getMD5sum(char * string)
+{
+    char result[MD5_DIGEST_LENGTH];
+
+    char *res = MD5(string, strlen(string), result);
+
+    char *readableSum = malloc(70);
+    memset(readableSum,0,70);
+    for(int n=0; n<MD5_DIGEST_LENGTH; n++)
+        sprintf(readableSum,"%s%02x",readableSum,  result[n]);
+    sprintf(readableSum,"%s\0",readableSum);
+    return readableSum;
+}
+

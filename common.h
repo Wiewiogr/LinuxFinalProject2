@@ -10,6 +10,7 @@
 #include <netdb.h>
 #include <time.h>
 #include <math.h>
+#include <openssl/md5.h>
 
 struct Message
 {
@@ -37,3 +38,5 @@ extern void createTimerAndRegisterHandler(timer_t *timerId, void(*handler)(int, 
 extern void setTimer(timer_t timerId,struct itimerspec *timeSpec);
 
 extern int messageComp(const void* first, const void* second);
+
+extern char* getMD5sum(char * string);
